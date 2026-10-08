@@ -19,6 +19,7 @@ def test_retriever_filters_below_threshold():
         {"document": "a.pdf", "page": 1, "content": "Relevant", "score": 0.8, "chunk_id": "a"},
         {"document": "b.pdf", "page": 2, "content": "Weak", "score": 0.2, "chunk_id": "b"},
     ]
+    store.expand_matches.side_effect = lambda matches: matches
     matches = SemanticRetriever(embeddings, store).retrieve("question", 5, 0.3)
     assert len(matches) == 1
     assert matches[0]["document"] == "a.pdf"
@@ -49,6 +50,10 @@ def test_generator_passes_citations_in_context():
         "chunk_id": "chunk-1",
     }
     captured = {}
+    history = [
+        {"role": "user", "content": "What does the paper say about attention?"},
+        {"role": "assistant", "content": "It describes attention."},
+    ]
 
     def fake_llm(prompt_value):
         captured["prompt"] = prompt_value.to_string()
@@ -58,11 +63,13 @@ def test_generator_passes_citations_in_context():
     with patch(
         "backend.app.generation.rag_chain.create_chat_model", return_value=fake_model
     ):
-        answer = generate_answer(settings, "What is attention?", [source])
+        answer = generate_answer(settings, "What is attention?", [source], history)
     assert "Grounded response" in answer
     assert "Sources: [paper.pdf, page 4]" in answer
     assert "[paper.pdf, page 4]" in captured["prompt"]
     assert "Attention text" in captured["prompt"]
+    assert "What does the paper say about attention?" in captured["prompt"]
+    assert "It describes attention." in captured["prompt"]
 
 
 def test_embedding_service_encodes_documents_and_query():
@@ -94,5 +101,38 @@ def test_vector_store_converts_cosine_distance_to_similarity():
             "content": "Text",
             "score": 0.82,
             "chunk_id": "chunk-1",
+            "chunk_index": 0,
         }
     ]
+
+
+def test_vector_store_expands_citation_to_neighboring_chunks():
+    store = VectorStore.__new__(VectorStore)
+    collection = Mock()
+    collection.get.return_value = {
+        "documents": ["Opening lines.", "Important explanation.", "Concluding lines."],
+        "metadatas": [
+            {"chunk_index": 0},
+            {"chunk_index": 1},
+            {"chunk_index": 2},
+        ],
+    }
+    store._collection = collection
+
+    sources = store.expand_matches(
+        [
+            {
+                "document": "paper.pdf",
+                "page": 2,
+                "content": "Important explanation.",
+                "score": 0.9,
+                "chunk_id": "chunk-1",
+                "chunk_index": 1,
+            }
+        ]
+    )
+
+    assert len(sources) == 1
+    assert sources[0]["content"] == (
+        "Opening lines.\nImportant explanation.\nConcluding lines."
+    )

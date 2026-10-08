@@ -40,7 +40,7 @@ Project_RAG/
 - Accepts PDF bytes at `POST /upload`, validates them, and saves them under `data/papers/`.
 - Extracts pages with PyMuPDF, chunks text with filename/page/chunk metadata, embeds on the backend, and writes vectors to persistent ChromaDB.
 - Retrieves matching chunks, sends their text and page citations to the configured LLM, and returns the answer with its sources.
-- Reads `OPENAI_API_KEY` and `LLM_MODEL` from the backend environment. The query API does not accept a caller-selected model.
+- Reads `LLM_API_KEY`, `LLM_BASE_URL`, and `LLM_MODEL` from the backend environment. The query API does not accept a caller-selected model.
 
 ### Frontend (`frontend/`)
 
@@ -60,7 +60,7 @@ flowchart TD
     E --> V[(Persistent backend ChromaDB)]
     U -->|POST /process| API
     U -->|question + retrieval settings: POST /query| API
-    API -->     R[Backend retrieval returns matching chunks]
+    API --> R[Backend retrieval returns matching chunks]
     V --> R
     R --> L[Backend LLM answers from chunks]
     L -->|answer + citations| API
@@ -73,7 +73,7 @@ From the project root:
 
 ```powershell
 Copy-Item .env.example .env  # only if .env does not already exist
-notepad .env                 # set OPENAI_API_KEY for answer generation
+notepad .env                 # set LLM_API_KEY for answer generation
 docker compose up --build
 ```
 
@@ -129,23 +129,26 @@ For Linux/macOS, create/activate a Python 3.11+ environment with the platform's 
 
 ## Add research papers
 
-Upload PDFs through the Streamlit sidebar at `http://localhost:8501`. The browser transfers file bytes to the backend `/upload` endpoint; the **backend** saves each accepted PDF to:
+Upload PDFs in the **Add or manage papers** section at `http://localhost:8501`. The browser transfers file bytes to the backend `/upload` endpoint; the **backend** saves each accepted PDF to:
 
 ```text
 Project_RAG/data/papers/
 ```
 
-Click **Process Documents** after uploading. The backend extracts text, creates page-aware chunks and embeddings, then persists them in `data/chroma/`. The system supports up to four PDFs, with a 50 MB default limit per upload. Image-only/scanned PDFs need OCR and currently are reported as having no extractable text.
+Click **Upload and prepare papers**. The backend extracts text, creates page-aware chunks and embeddings, then persists them in `data/chroma/`. If PDFs were copied directly into the papers folder, click **Prepare papers already uploaded**. The system supports up to four PDFs, with a 50 MB default limit per upload. Image-only/scanned PDFs need OCR and currently are reported as having no extractable text.
+
+Ask questions in the conversation at the bottom of the page. Follow-up questions use the recent conversation to understand context. Open **Paper references** under an answer to read the matched passage, its surrounding lines, document, page, and a simple text-match percentage.
 
 ## Configuration
 
-Copy `.env.example` to `.env` and configure the backend. Keep real credentials in `.env` only; `.env` is ignored by Git and excluded from Docker build context.
+Copy `.env.example` to `.env` and configure the backend. Keep real credentials in `.env` only; `.env` is ignored by Git and excluded from Docker build context. The backend uses `ChatOpenAI` with the OpenAI-compatible chat-completions API, so set the provider's API key, model ID, and (if required) base URL. OpenAI works with a blank `LLM_BASE_URL`; Gemini can use Google's OpenAI-compatible endpoint; compatible gateways/providers such as OpenRouter, Groq, or local OpenAI-compatible servers can use their own endpoint and model ID. A provider without an OpenAI-compatible endpoint needs an adapter before it can be used.
 
 | Variable | Default | Description |
 |---|---|---|
-| `OPENAI_API_KEY` | empty | Backend key for answer generation |
-| `OPENAI_BASE_URL` | empty | Optional OpenAI-compatible API base URL |
-| `LLM_MODEL` | `gpt-4o-mini` | Backend-selected generation model |
+| `LLM_API_KEY` | empty | Backend API key for the selected provider |
+| `LLM_BASE_URL` | empty | OpenAI-compatible provider URL; leave blank for OpenAI |
+| `LLM_MODEL` | `gpt-4o-mini` | Provider model ID |
+| `LLM_MAX_OUTPUT_TOKENS` | `400` | Maximum answer length in output tokens |
 | `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Backend embedding model |
 | `CHUNK_SIZE` | `1000` | Chunk length in characters |
 | `CHUNK_OVERLAP` | `200` | Overlap in characters |
@@ -157,6 +160,27 @@ Copy `.env.example` to `.env` and configure the backend. Keep real credentials i
 | `RAG_API_URL` | `http://localhost:8000` | Frontend API URL; Compose sets it to `http://backend:8000` |
 
 The first processing or querying operation downloads/loads the embedding model if it is not cached.
+
+Provider examples (use a model name supported by that provider):
+
+```dotenv
+# OpenAI
+LLM_API_KEY=your-provider-key
+LLM_BASE_URL=
+LLM_MODEL=gpt-4o-mini
+
+# Gemini OpenAI-compatible endpoint
+LLM_API_KEY=your-gemini-key
+LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+LLM_MODEL=your-supported-gemini-model
+
+# Any other OpenAI-compatible endpoint
+LLM_API_KEY=your-provider-key
+LLM_BASE_URL=https://provider.example/v1
+LLM_MODEL=your-provider-model
+```
+
+The backend sends `max_tokens=400` by default (configurable with `LLM_MAX_OUTPUT_TOKENS`). Providers must support the OpenAI-compatible chat-completions API and its `max_tokens` setting. Existing `OPENAI_API_KEY` and `OPENAI_BASE_URL` variable names continue to work.
 
 ## Backend API
 
@@ -189,14 +213,14 @@ Example response:
       "document": "attention_is_all_you_need.pdf",
       "page": 4,
       "content": "Multi-head attention allows the model to jointly attend to information...",
-      "score": 0.82,
+      "match_percent": 82,
       "chunk_id": "..."
     }
   ]
 }
 ```
 
-`POST /query` accepts `question`, and optional `top_k` and `similarity_threshold`. It rejects extra fields; model selection and API credentials stay backend-only. When no context meets the threshold, the backend returns: `"The answer is not available in the provided documents."`
+`POST /query` accepts `question`, optional conversation `history`, `top_k`, and `similarity_threshold`. It rejects extra fields; model selection and API credentials stay backend-only. The backend expands matched chunks with adjacent text from the same page so references show a fuller passage. When no context meets the threshold, the backend returns: `"The answer is not available in the provided documents."`
 
 ## Tests
 
@@ -211,7 +235,7 @@ Tests use generated PDF fixtures and mock embeddings/vector results/LLM output. 
 ## Troubleshooting
 
 - **Cannot connect to API:** start the backend and verify `http://localhost:8000/health` returns `{"status":"ok"}`. In Compose, the frontend uses the internal host `backend`, not `localhost`.
-- **`OPENAI_API_KEY` missing:** set it in the root `.env`; it is read by the backend only. Document processing does not require this key.
+- **`LLM_API_KEY` missing:** set the selected provider's key in the root `.env`; it is read by the backend only. For compatibility, older `.env` files using `OPENAI_API_KEY` and `OPENAI_BASE_URL` are still accepted. Document processing does not require the key.
 - **No answer/relevant sources:** confirm papers have been processed and lower the similarity threshold if appropriate.
 - **PDF has no extractable text:** the current extractor needs embedded text; scanned papers require OCR.
 - **Model download fails:** ensure the backend can access Hugging Face on first use or pre-cache the Sentence Transformer model.

@@ -3,7 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,9 +16,16 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    openai_api_key: str = ""
-    openai_base_url: str | None = None
+    llm_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("LLM_API_KEY", "OPENAI_API_KEY"),
+    )
+    llm_base_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_BASE_URL", "OPENAI_BASE_URL"),
+    )
     llm_model: str = "gpt-4o-mini"
+    llm_max_output_tokens: int = Field(default=400, ge=1, le=8192)
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     chunk_size: int = Field(default=1000, ge=100, le=10000)
     chunk_overlap: int = Field(default=200, ge=0, le=5000)

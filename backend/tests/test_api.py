@@ -44,10 +44,12 @@ def test_query_rejects_frontend_model_override():
 
 def test_query_returns_retrieved_sources(monkeypatch, client):
     from backend.app.retrieval.retriever import SemanticRetriever
-    monkeypatch.setattr(
-        SemanticRetriever,
-        "retrieve",
-        lambda self, question, top_k, threshold: [
+
+    observed = {}
+
+    def fake_retrieve(self, question, top_k, threshold):
+        observed["retrieval_question"] = question
+        return [
             {
                 "document": "paper.pdf",
                 "page": 2,
@@ -55,19 +57,31 @@ def test_query_returns_retrieved_sources(monkeypatch, client):
                 "score": 0.9,
                 "chunk_id": "chunk-1",
             }
-        ],
+        ]
+
+    monkeypatch.setattr(
+        SemanticRetriever,
+        "retrieve",
+        fake_retrieve,
     )
     monkeypatch.setattr(
         "backend.app.api.routes.generate_answer",
-        lambda settings, question, sources: "Answer [paper.pdf, page 2].",
+        lambda settings, question, sources, history: "Answer [paper.pdf, page 2].",
     )
     response = client.post(
         "/query",
-        json={"question": "What is described?"},
+        json={
+            "question": "What is described?",
+            "history": [{"role": "user", "content": "Tell me about the paper."}],
+        },
     )
     assert response.status_code == 200
     assert response.json()["sources"][0]["page"] == 2
+    assert response.json()["sources"][0]["match_percent"] == 90
     assert response.json()["answer"].startswith("Answer")
+    assert observed["retrieval_question"] == (
+        "Tell me about the paper. What is described?"
+    )
 
 
 def test_upload_rejects_non_pdf(monkeypatch, client):

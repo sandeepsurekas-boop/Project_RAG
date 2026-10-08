@@ -170,8 +170,12 @@ def query_documents(body: QueryRequest, request: Request) -> QueryResponse:
     settings = request.app.state.settings
     try:
         retriever: SemanticRetriever = request.app.state.retriever
+        previous_questions = [
+            turn.content for turn in body.history if turn.role == "user"
+        ][-2:]
+        retrieval_question = " ".join([*previous_questions, body.question])
         sources = retriever.retrieve(
-            body.question,
+            retrieval_question,
             body.top_k or settings.top_k,
             (
                 body.similarity_threshold
@@ -179,12 +183,26 @@ def query_documents(body: QueryRequest, request: Request) -> QueryResponse:
                 else settings.similarity_threshold
             ),
         )
-        answer = generate_answer(settings, body.question, sources)
+        answer = generate_answer(
+            settings,
+            body.question,
+            sources,
+            [turn.model_dump() for turn in body.history],
+        )
     except RuntimeError as exc:
         message = str(exc)
-        if "OPENAI_API_KEY" in message:
+        if "LLM_API_KEY" in message:
             raise HTTPException(status_code=503, detail=message) from exc
         if "Sentence Transformers" in message or "model" in message.lower():
             raise HTTPException(status_code=503, detail=message) from exc
         raise HTTPException(status_code=502, detail=message) from exc
-    return QueryResponse(answer=answer, sources=sources)
+    return QueryResponse(
+        answer=answer,
+        sources=[
+            {
+                **source,
+                "match_percent": round(max(0.0, source["score"]) * 100),
+            }
+            for source in sources
+        ],
+    )

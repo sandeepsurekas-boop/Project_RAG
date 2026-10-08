@@ -28,6 +28,7 @@ class SemanticRetriever:
         relevant = [
             match for match in matches if match["score"] >= similarity_threshold
         ]
+        relevant = self.vector_store.expand_matches(relevant)
         logger.info(
             "Similarity filter retained %d of %d chunks (threshold %.2f)",
             len(relevant),

@@ -1,12 +1,20 @@
 """Pydantic API request and response models."""
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
 
 
 class QueryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     question: str = Field(min_length=1, max_length=4000)
+    history: list[ChatTurn] = Field(default_factory=list, max_length=12)
     top_k: int | None = Field(default=None, ge=1, le=20)
     similarity_threshold: float | None = Field(default=None, ge=-1, le=1)
 
@@ -23,7 +31,7 @@ class Source(BaseModel):
     document: str
     page: int = Field(ge=1)
     content: str
-    score: float = Field(ge=-1, le=1)
+    match_percent: int = Field(ge=0, le=100)
     chunk_id: str
 
 

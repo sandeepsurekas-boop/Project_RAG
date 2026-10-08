@@ -111,10 +111,78 @@ class VectorStore:
                         6,
                     ),
                     "chunk_id": str(chunk_id),
+                    "chunk_index": int(metadata.get("chunk_index", 0)),
                 }
             )
         logger.info("Retrieved %d chunks", len(matches))
         return matches
+
+    def expand_matches(
+        self, matches: list[dict[str, Any]], neighbors: int = 1
+    ) -> list[dict[str, Any]]:
+        """Include adjacent chunks so citations show a complete passage."""
+        pages: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+        for match in matches:
+            pages[(match["document"], match["page"])].append(match)
+
+        expanded: list[dict[str, Any]] = []
+        for (filename, page), anchors in pages.items():
+            try:
+                result = self.collection.get(
+                    where={"$and": [{"filename": filename}, {"page": page}]},
+                    include=["documents", "metadatas"],
+                )
+            except Exception as exc:
+                logger.exception("Unable to load neighboring source chunks")
+                raise RuntimeError(f"Unable to expand source context: {exc}") from exc
+
+            page_chunks = {
+                int(metadata["chunk_index"]): document
+                for document, metadata in zip(
+                    result.get("documents") or [],
+                    result.get("metadatas") or [],
+                )
+                if document is not None and metadata is not None
+            }
+            ranges = sorted(
+                (
+                    max(0, anchor["chunk_index"] - neighbors),
+                    anchor["chunk_index"] + neighbors,
+                )
+                for anchor in anchors
+            )
+            merged_ranges: list[list[int]] = []
+            for start, end in ranges:
+                if merged_ranges and start <= merged_ranges[-1][1] + 1:
+                    merged_ranges[-1][1] = max(merged_ranges[-1][1], end)
+                else:
+                    merged_ranges.append([start, end])
+
+            for start, end in merged_ranges:
+                passage_anchors = [
+                    anchor
+                    for anchor in anchors
+                    if start <= anchor["chunk_index"] <= end
+                ]
+                selected_indexes = [
+                    index for index in range(start, end + 1) if index in page_chunks
+                ]
+                if not selected_indexes:
+                    continue
+                expanded.append(
+                    {
+                        "document": filename,
+                        "page": page,
+                        "content": "\n".join(
+                            page_chunks[index] for index in selected_indexes
+                        ),
+                        "score": max(anchor["score"] for anchor in passage_anchors),
+                        "chunk_id": ", ".join(
+                            anchor["chunk_id"] for anchor in passage_anchors
+                        ),
+                    }
+                )
+        return expanded
 
     def list_documents(self) -> list[dict[str, int | str]]:
         """Aggregate processed document metadata from stored chunks."""
