@@ -3,11 +3,11 @@
 import logging
 from pathlib import Path
 
-from app.config import Settings
-from app.embeddings.embedding_service import EmbeddingService
-from app.ingestion.chunker import split_pages
-from app.ingestion.pdf_loader import load_pdf
-from app.retrieval.vector_store import VectorStore
+from backend.app.config import Settings
+from backend.app.embeddings.embedding_service import EmbeddingService
+from backend.app.ingestion.chunker import split_pages
+from backend.app.ingestion.pdf_loader import load_pdf
+from backend.app.retrieval.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 

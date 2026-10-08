@@ -6,14 +6,13 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import router
-from app.config import get_settings
-from app.embeddings.embedding_service import EmbeddingService
-from app.generation.rag_chain import RagAnswerGenerator
-from app.ingestion.processor import DocumentProcessor
-from app.retrieval.retriever import SemanticRetriever
-from app.retrieval.vector_store import VectorStore
-from app.utils.logging_config import configure_logging
+from backend.app.api.routes import router
+from backend.app.config import get_settings
+from backend.app.embeddings.embedding_service import EmbeddingService
+from backend.app.ingestion.processor import DocumentProcessor
+from backend.app.retrieval.retriever import SemanticRetriever
+from backend.app.retrieval.vector_store import VectorStore
+from backend.app.utils.logging_config import configure_logging
 
 configure_logging()
 
@@ -29,7 +28,6 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.vector_store = vector_store
     application.state.processor = DocumentProcessor(settings, embeddings, vector_store)
     application.state.retriever = SemanticRetriever(embeddings, vector_store)
-    application.state.answer_generator = RagAnswerGenerator(settings)
     yield
 
 

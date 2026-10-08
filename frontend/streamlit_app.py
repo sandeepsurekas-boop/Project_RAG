@@ -72,7 +72,6 @@ with st.sidebar:
         step=0.05,
         help="Only chunks whose cosine similarity meets this threshold are used.",
     )
-    model = st.text_input("LLM model", value=os.getenv("LLM_MODEL", "gpt-4o-mini"))
     if st.button("Clear vector database", use_container_width=True):
         cleared = api_request("DELETE", "/documents")
         if cleared:
@@ -106,7 +105,7 @@ if submitted:
     elif not documents:
         st.warning("Process at least one paper before asking a question.")
     else:
-        with st.spinner("Searching papers and generating a cited answer..."):
+        with st.spinner("Backend is searching the papers and generating a cited answer..."):
             result = api_request(
                 "POST",
                 "/query",
@@ -114,7 +113,6 @@ if submitted:
                     "question": question.strip(),
                     "top_k": top_k,
                     "similarity_threshold": threshold,
-                    "model": model.strip() or None,
                 },
             )
         if result:

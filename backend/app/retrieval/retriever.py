@@ -3,8 +3,8 @@
 import logging
 from typing import Any
 
-from app.embeddings.embedding_service import EmbeddingService
-from app.retrieval.vector_store import VectorStore
+from backend.app.embeddings.embedding_service import EmbeddingService
+from backend.app.retrieval.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 

@@ -5,10 +5,10 @@ from unittest.mock import Mock, patch
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
-from app.embeddings.embedding_service import EmbeddingService
-from app.generation.rag_chain import NOT_AVAILABLE_ANSWER, RagAnswerGenerator
-from app.retrieval.retriever import SemanticRetriever
-from app.retrieval.vector_store import VectorStore
+from backend.app.embeddings.embedding_service import EmbeddingService
+from backend.app.generation.rag_chain import NOT_AVAILABLE, generate_answer
+from backend.app.retrieval.retriever import SemanticRetriever
+from backend.app.retrieval.vector_store import VectorStore
 
 
 def test_retriever_filters_below_threshold():
@@ -34,9 +34,8 @@ def test_retriever_skips_embedding_when_no_documents_are_indexed():
 
 
 def test_generator_returns_fallback_without_calling_llm():
-    generator = RagAnswerGenerator(Mock())
-    with patch("app.generation.rag_chain.create_chat_model") as create_model:
-        assert generator.generate("question", []) == NOT_AVAILABLE_ANSWER
+    with patch("backend.app.generation.rag_chain.create_chat_model") as create_model:
+        assert generate_answer(Mock(), "question", []) == NOT_AVAILABLE
         create_model.assert_not_called()
 
 
@@ -57,13 +56,12 @@ def test_generator_passes_citations_in_context():
 
     fake_model = RunnableLambda(fake_llm)
     with patch(
-        "app.generation.rag_chain.create_chat_model", return_value=fake_model
+        "backend.app.generation.rag_chain.create_chat_model", return_value=fake_model
     ):
-        answer = RagAnswerGenerator(settings).generate("What is attention?", [source])
+        answer = generate_answer(settings, "What is attention?", [source])
     assert "Grounded response" in answer
-    assert "[Source 1: paper.pdf, page 4]" in answer
-    assert "document=paper.pdf" in captured["prompt"]
-    assert "page=4" in captured["prompt"]
+    assert "Sources: [paper.pdf, page 4]" in answer
+    assert "[paper.pdf, page 4]" in captured["prompt"]
     assert "Attention text" in captured["prompt"]
 
 

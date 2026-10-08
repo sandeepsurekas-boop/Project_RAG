@@ -1,13 +1,14 @@
 """Pydantic API request and response models."""
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class QueryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     question: str = Field(min_length=1, max_length=4000)
     top_k: int | None = Field(default=None, ge=1, le=20)
     similarity_threshold: float | None = Field(default=None, ge=-1, le=1)
-    model: str | None = Field(default=None, min_length=1, max_length=200)
 
     @field_validator("question")
     @classmethod
@@ -16,14 +17,6 @@ class QueryRequest(BaseModel):
         if not cleaned:
             raise ValueError("Question must not be empty.")
         return cleaned
-
-    @field_validator("model")
-    @classmethod
-    def strip_model(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        cleaned = value.strip()
-        return cleaned or None
 
 
 class Source(BaseModel):

@@ -5,7 +5,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from app.config import Settings
+from backend.app.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +106,10 @@ class VectorStore:
                     "document": str(metadata.get("filename", "unknown")),
                     "page": int(metadata.get("page", 0)),
                     "content": str(content),
-                    "score": max(-1.0, min(1.0, 1.0 - float(distance))),
+                    "score": round(
+                        max(-1.0, min(1.0, 1.0 - float(distance))),
+                        6,
+                    ),
                     "chunk_id": str(chunk_id),
                 }
             )

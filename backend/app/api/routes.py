@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 
-from app.api.schemas import (
+from backend.app.api.schemas import (
     DocumentsResponse,
     HealthResponse,
     MessageResponse,
@@ -15,12 +15,12 @@ from app.api.schemas import (
     QueryResponse,
     UploadResponse,
 )
-from app.config import Settings
-from app.generation.rag_chain import RagAnswerGenerator
-from app.ingestion.chunker import safe_pdf_filename
-from app.ingestion.processor import DocumentProcessor
-from app.retrieval.retriever import SemanticRetriever
-from app.retrieval.vector_store import VectorStore
+from backend.app.config import Settings
+from backend.app.generation.rag_chain import generate_answer
+from backend.app.ingestion.chunker import safe_pdf_filename
+from backend.app.ingestion.processor import DocumentProcessor
+from backend.app.retrieval.retriever import SemanticRetriever
+from backend.app.retrieval.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -167,7 +167,7 @@ def clear_documents(request: Request) -> MessageResponse:
 @router.post("/query", response_model=QueryResponse)
 def query_documents(body: QueryRequest, request: Request) -> QueryResponse:
     """Retrieve source chunks and generate a grounded answer."""
-    settings, vector_store = _services(request)
+    settings = request.app.state.settings
     try:
         retriever: SemanticRetriever = request.app.state.retriever
         sources = retriever.retrieve(
@@ -179,8 +179,7 @@ def query_documents(body: QueryRequest, request: Request) -> QueryResponse:
                 else settings.similarity_threshold
             ),
         )
-        generator: RagAnswerGenerator = request.app.state.answer_generator
-        answer = generator.generate(body.question, sources, body.model)
+        answer = generate_answer(settings, body.question, sources)
     except RuntimeError as exc:
         message = str(exc)
         if "OPENAI_API_KEY" in message:

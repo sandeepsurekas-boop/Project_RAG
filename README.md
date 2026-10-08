@@ -1,118 +1,181 @@
 # Research Paper RAG
 
-A local Retrieval-Augmented Generation (RAG) application for asking grounded questions across up to four AI research papers. It includes a FastAPI REST API, a Streamlit UI, persistent ChromaDB storage, Sentence Transformer embeddings, and OpenAI-compatible answer generation.
+An end-to-end question-answering application for three or four AI research papers. The application has a strict service boundary: **the backend owns uploaded files, PDF processing, embeddings, ChromaDB, retrieval, and LLM answer generation; the Streamlit frontend is only an API client.**
 
-## Architecture
+## Project structure
+
+```text
+Project_RAG/
+├── backend/
+│   ├── app/
+│   │   ├── api/              # FastAPI routes and Pydantic schemas
+│   │   ├── embeddings/       # Sentence Transformer embeddings
+│   │   ├── generation/       # Backend-only OpenAI-compatible RAG chain
+│   │   ├── ingestion/        # PDF extraction, chunking, indexing
+│   │   ├── retrieval/        # Backend-only persistent ChromaDB and retriever
+│   │   ├── utils/
+│   │   ├── config.py
+│   │   └── main.py
+│   ├── tests/
+│   ├── Dockerfile
+│   ├── requirements.txt      # Backend runtime dependencies only
+│   └── requirements-dev.txt
+├── frontend/
+│   ├── streamlit_app.py      # UI and HTTP requests only
+│   ├── Dockerfile
+│   └── requirements.txt      # Streamlit and HTTP client only
+├── data/
+│   ├── papers/               # Backend upload destination (local/Docker volume)
+│   └── chroma/               # Backend persistent vector database
+├── .env.example
+├── docker-compose.yml
+├── requirements.txt          # Convenience install for local development/tests
+└── run.sh
+```
+
+## Service responsibilities
+
+### Backend (`backend/`)
+
+- Accepts PDF bytes at `POST /upload`, validates them, and saves them under `data/papers/`.
+- Extracts pages with PyMuPDF, chunks text with filename/page/chunk metadata, embeds on the backend, and writes vectors to persistent ChromaDB.
+- Retrieves matching chunks, sends their text and page citations to the configured LLM, and returns the answer with its sources.
+- Reads `OPENAI_API_KEY` and `LLM_MODEL` from the backend environment. The query API does not accept a caller-selected model.
+
+### Frontend (`frontend/`)
+
+- Displays upload, processing, retrieval, and question-answer controls.
+- Sends PDF bytes and query options to FastAPI; displays the answer and returned sources.
+- Does not import or install ChromaDB, Sentence Transformers, LangChain, or an LLM client. It never reads the OpenAI key or writes uploaded files.
+
+## Request flow
 
 ```mermaid
 flowchart TD
-    A[PDF papers] --> B[PyMuPDF text extraction]
-    B --> C[Page-aware chunking + metadata]
-    C --> D[Sentence Transformer embeddings]
-    D --> E[(Persistent ChromaDB)]
-    F[User question] --> G[Query embedding]
-    G --> H[Cosine similarity retrieval + threshold]
-    E --> H
-    H --> I[Relevant context: document, page, chunk]
-    I --> J[LangChain prompt + OpenAI-compatible LLM]
-    F --> J
-    J --> K[Grounded answer + source citations]
+    U[Streamlit UI] -->|PDF bytes: POST /upload| API[FastAPI backend]
+    API -->|save PDF| P[data/papers]
+    P --> X[PyMuPDF page extraction]
+    X --> C[Page-aware chunking]
+    C --> E[Sentence Transformer embedding]
+    E --> V[(Persistent backend ChromaDB)]
+    U -->|POST /process| API
+    U -->|question + retrieval settings: POST /query| API
+    API -->     R[Backend retrieval returns matching chunks]
+    V --> R
+    R --> L[Backend LLM answers from chunks]
+    L -->|answer + citations| API
+    API -->|JSON response| U
 ```
 
-## RAG workflow
+## Run with Docker (recommended)
 
-1. Upload PDF files (up to four) through the UI or `POST /upload`.
-2. `POST /process` extracts each page with PyMuPDF, splits page text into overlapping chunks, embeds the chunks, and persists vectors and metadata in ChromaDB.
-3. A query is embedded with the same Sentence Transformer. ChromaDB returns the nearest chunks; results below the configured similarity threshold are discarded.
-4. LangChain formats the remaining document name, page number, and chunk text into a context-only prompt and calls the configured OpenAI-compatible chat model.
-5. The response includes the answer and the exact retrieved source chunks with document, page, chunk ID, and cosine similarity. With no qualifying context the API returns the required not-available answer without calling the LLM.
+From the project root:
 
-## Technologies
-
-- Python 3.11+
-- FastAPI, Pydantic 2, Uvicorn
-- Streamlit
-- LangChain Core and LangChain OpenAI
-- ChromaDB persistent client
-- Sentence Transformers (`sentence-transformers/all-MiniLM-L6-v2`)
-- PyMuPDF
-- pytest and HTTPX
-
-## Installation
-
-From this directory:
-
-```bash
-python -m venv .venv
-# Windows PowerShell
-.venv\Scripts\Activate.ps1
-# macOS/Linux: source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-Copy-Item .env.example .env  # Windows PowerShell
-# macOS/Linux: cp .env.example .env
-```
-
-Set `OPENAI_API_KEY` in `.env` before querying. The key is not needed to start the API, upload/process papers, or run tests. For an OpenAI-compatible provider, set `OPENAI_BASE_URL` as well. The first embedding operation downloads the configured Sentence Transformer model if it is not already cached.
-
-## Run locally
-
-Start the REST API in one terminal:
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-Start the UI in another terminal:
-
-```bash
-streamlit run frontend/streamlit_app.py
-```
-
-Open `http://localhost:8501`. API docs are at `http://localhost:8000/docs`. The UI uses `http://localhost:8000` by default; override it with `RAG_API_URL` if necessary.
-
-`run.sh` runs both processes on macOS/Linux. On Windows, use the two terminal commands above.
-
-## Docker
-
-```bash
+```powershell
+Copy-Item .env.example .env  # only if .env does not already exist
+notepad .env                 # set OPENAI_API_KEY for answer generation
 docker compose up --build
 ```
 
-The UI is available at `http://localhost:8501`, and the API at `http://localhost:8000`. Set `OPENAI_API_KEY` in your host environment or `.env` before starting to enable answer generation. The `data` directory is mounted for local PDF and vector persistence.
+Open the UI at `http://localhost:8501`; FastAPI and interactive API docs are at `http://localhost:8000` and `http://localhost:8000/docs`.
+
+Compose builds separate images. Only the backend service receives `.env` and mounts `data/`. The Streamlit container receives only `RAG_API_URL=http://backend:8000` and waits for the backend health check. Neither image includes the other service's application dependencies.
+
+Stop the services with `Ctrl+C`. Add `-d` to run detached, then use `docker compose down` to stop them. Uploaded PDFs and Chroma data are retained in the host `data/` directory.
+
+## Run locally on Windows
+
+Run commands from the project root. The UI talks to the local API at `http://localhost:8000`.
+
+Create and activate a Python 3.11+ environment if needed:
+
+```powershell
+py -3.11 -m venv venv
+.\venv\Scripts\Activate.ps1
+```
+
+If PowerShell blocks activation, allow scripts for this PowerShell process only:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\venv\Scripts\Activate.ps1
+```
+
+Install the combined local-development dependencies:
+
+```powershell
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+```
+
+Activation is optional. Use `.\venv\Scripts\python.exe` instead of `python` for the following commands if shell environment injection or activation is disabled.
+
+Start the backend in the first terminal:
+
+```powershell
+python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+```
+
+Start the frontend in a second terminal:
+
+```powershell
+python -m streamlit run frontend/streamlit_app.py
+```
+
+Both commands must run from the project root so the backend reads the root `.env` and uses the root `data/` folder. The frontend itself needs no OpenAI credentials.
+
+For Linux/macOS, create/activate a Python 3.11+ environment with the platform's normal `venv` commands, install `requirements.txt`, and run the same two `python -m ...` commands. `run.sh` launches both services for local development.
+
+## Add research papers
+
+Upload PDFs through the Streamlit sidebar at `http://localhost:8501`. The browser transfers file bytes to the backend `/upload` endpoint; the **backend** saves each accepted PDF to:
+
+```text
+Project_RAG/data/papers/
+```
+
+Click **Process Documents** after uploading. The backend extracts text, creates page-aware chunks and embeddings, then persists them in `data/chroma/`. The system supports up to four PDFs, with a 50 MB default limit per upload. Image-only/scanned PDFs need OCR and currently are reported as having no extractable text.
 
 ## Configuration
 
-Copy `.env.example` to `.env` and configure:
+Copy `.env.example` to `.env` and configure the backend. Keep real credentials in `.env` only; `.env` is ignored by Git and excluded from Docker build context.
 
 | Variable | Default | Description |
 |---|---|---|
-| `OPENAI_API_KEY` | empty | API key for answer generation |
-| `OPENAI_BASE_URL` | empty | Optional compatible provider URL |
-| `LLM_MODEL` | `gpt-4o-mini` | Chat completion model |
-| `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Local embedding model |
+| `OPENAI_API_KEY` | empty | Backend key for answer generation |
+| `OPENAI_BASE_URL` | empty | Optional OpenAI-compatible API base URL |
+| `LLM_MODEL` | `gpt-4o-mini` | Backend-selected generation model |
+| `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Backend embedding model |
 | `CHUNK_SIZE` | `1000` | Chunk length in characters |
 | `CHUNK_OVERLAP` | `200` | Overlap in characters |
-| `TOP_K` | `5` | Default maximum retrieved chunks |
-| `SIMILARITY_THRESHOLD` | `0.3` | Minimum cosine similarity (range `-1` to `1`) |
-| `CHROMA_PERSIST_DIRECTORY` | `./data/chroma` | Persistent vector database directory |
-| `PAPERS_DIRECTORY` | `./data/papers` | Uploaded PDF directory |
-| `MAX_UPLOAD_MB` | `50` | Maximum size of a single PDF |
+| `TOP_K` | `5` | Default number of candidates to retrieve |
+| `SIMILARITY_THRESHOLD` | `0.3` | Minimum cosine similarity, from `-1` to `1` |
+| `CHROMA_PERSIST_DIRECTORY` | `./data/chroma` | Backend ChromaDB directory |
+| `PAPERS_DIRECTORY` | `./data/papers` | Backend PDF upload directory |
+| `MAX_UPLOAD_MB` | `50` | Maximum size of an individual PDF |
+| `RAG_API_URL` | `http://localhost:8000` | Frontend API URL; Compose sets it to `http://backend:8000` |
 
-## API
+The first processing or querying operation downloads/loads the embedding model if it is not cached.
 
-- `GET /health` — application health.
-- `POST /upload` — multipart upload; accepts repeated `files` fields, up to four papers total.
-- `POST /process` — validate, extract, chunk, embed, and persist newly uploaded papers.
-- `GET /documents` — list processed documents and their page/chunk counts.
-- `DELETE /documents` — clear the vector collection. Uploaded PDFs remain available for reprocessing.
-- `POST /query` — ask a question, with optional `top_k`, `similarity_threshold`, and model override.
+## Backend API
 
-Example:
+All of these endpoints run in FastAPI; the frontend does not perform the work itself.
 
-```bash
-curl -X POST http://localhost:8000/query \
-  -H "Content-Type: application/json" \
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/health` | Backend health check |
+| `POST` | `/upload` | Upload PDF multipart field(s) named `files` |
+| `POST` | `/process` | Process newly uploaded PDFs and create/update backend vectors |
+| `GET` | `/documents` | List indexed papers and page/chunk counts |
+| `DELETE` | `/documents` | Clear ChromaDB collection; uploaded PDFs remain |
+| `POST` | `/query` | Backend retrieval and answer generation |
+
+Example query:
+
+```powershell
+curl.exe -X POST http://localhost:8000/query `
+  -H "Content-Type: application/json" `
   -d "{\"question\":\"What is multi-head attention?\",\"top_k\":5}"
 ```
 
@@ -120,7 +183,7 @@ Example response:
 
 ```json
 {
-  "answer": "Multi-head attention runs multiple attention operations in parallel, allowing the model to attend to information from different representation subspaces [attention_is_all_you_need.pdf, page 4].",
+  "answer": "Multi-head attention allows the model to attend to information from different representation subspaces [attention_is_all_you_need.pdf, page 4].\n\nSources: [Source 1: attention_is_all_you_need.pdf, page 4]",
   "sources": [
     {
       "document": "attention_is_all_you_need.pdf",
@@ -133,32 +196,27 @@ Example response:
 }
 ```
 
-## Example questions
-
-- What are the main components of a RAG model, and how do they interact?
-- What are the two sub-layers in each Transformer encoder layer?
-- Explain positional encoding in Transformers.
-- Why is multi-head attention beneficial?
-- What is few-shot learning and how does GPT-3 implement it?
-- How do the approaches described in these papers differ?
+`POST /query` accepts `question`, and optional `top_k` and `similarity_threshold`. It rejects extra fields; model selection and API credentials stay backend-only. When no context meets the threshold, the backend returns: `"The answer is not available in the provided documents."`
 
 ## Tests
 
-```bash
-pytest
+Install development dependencies with root `requirements.txt`, then run from the project root:
+
+```powershell
+python -m pytest backend/tests -q
 ```
 
-Tests mock the embedding model and LLM where appropriate; no API key or model download is needed. PDF extraction is tested with a generated in-memory PDF.
+Tests use generated PDF fixtures and mock embeddings/vector results/LLM output. They do not require a live OpenAI key or downloading the embedding model.
 
 ## Troubleshooting
 
-- **Missing API key:** set `OPENAI_API_KEY` in `.env`. Ingestion works without it; queries with relevant sources return a clear configuration error.
-- **No context found:** lower the similarity threshold or upload/process the relevant paper. The system will not call the LLM without a qualifying chunk.
-- **Invalid or empty PDF:** upload only readable PDFs with extractable text; scanned image-only PDFs need OCR, which is not currently included.
-- **Embedding model download errors:** ensure the machine can access Hugging Face on the first run, or pre-cache the selected Sentence Transformer model.
-- **Different model provider:** set `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and `LLM_MODEL` to the provider's compatible endpoint/key/model.
-- **Chroma persistence errors:** ensure the configured data directory is writable and not being shared by incompatible application versions.
+- **Cannot connect to API:** start the backend and verify `http://localhost:8000/health` returns `{"status":"ok"}`. In Compose, the frontend uses the internal host `backend`, not `localhost`.
+- **`OPENAI_API_KEY` missing:** set it in the root `.env`; it is read by the backend only. Document processing does not require this key.
+- **No answer/relevant sources:** confirm papers have been processed and lower the similarity threshold if appropriate.
+- **PDF has no extractable text:** the current extractor needs embedded text; scanned papers require OCR.
+- **Model download fails:** ensure the backend can access Hugging Face on first use or pre-cache the Sentence Transformer model.
+- **Compose cannot find a file:** run `docker compose` from the project root, where `docker-compose.yml` resides.
 
-## Future improvements
+## Possible extensions
 
-OCR for scanned papers, hybrid BM25/vector retrieval, reranking, asynchronous ingestion, document deletion by ID, and support for additional metadata filters can be added behind the modular ingestion and retrieval interfaces.
+OCR, hybrid BM25/vector search, reranking, background ingestion jobs, document-level deletion, authentication, and configurable metadata filters can be added behind the backend service without putting data or model logic in Streamlit.

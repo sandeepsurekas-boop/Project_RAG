@@ -1,16 +1,39 @@
 services:
-  rag:
-    build: .
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     ports:
       - "8000:8000"
-      - "8501:8501"
     env_file:
       - path: .env
         required: false
     environment:
-      RAG_API_URL: http://localhost:8000
-      CHROMA_PERSIST_DIRECTORY: /app/data/chroma
-      PAPERS_DIRECTORY: /app/data/papers
+      CHROMA_PERSIST_DIRECTORY: /service/data/chroma
+      PAPERS_DIRECTORY: /service/data/papers
     volumes:
-      - ./data:/app/data
+      - ./data:/service/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "8501:8501"
+    environment:
+      RAG_API_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
     restart: unless-stopped

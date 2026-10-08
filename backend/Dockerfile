@@ -4,15 +4,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-WORKDIR /app
+WORKDIR /service
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
-COPY . .
-RUN mkdir -p /app/data/papers /app/data/chroma
+COPY backend/__init__.py ./backend/__init__.py
+COPY backend/app ./backend/app
+RUN mkdir -p /service/data/papers /service/data/chroma
 
-EXPOSE 8000 8501
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8000 & streamlit run frontend/streamlit_app.py --server.address 0.0.0.0 --server.port 8501"]
+EXPOSE 8000
+CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

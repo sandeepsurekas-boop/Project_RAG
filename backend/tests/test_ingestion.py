@@ -4,16 +4,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-import fitz
+import pymupdf
 import pytest
 
-from app.ingestion.chunker import safe_pdf_filename, split_pages
-from app.ingestion.pdf_loader import PDFLoadError, load_pdf
-from app.ingestion.processor import DocumentProcessor
+from backend.app.ingestion.chunker import safe_pdf_filename, split_pages
+from backend.app.ingestion.pdf_loader import PDFLoadError, load_pdf
+from backend.app.ingestion.processor import DocumentProcessor
 
 
 def make_pdf(tmp_path: Path, text: str, name: str = "paper.pdf") -> Path:
-    pdf = fitz.open()
+    pdf = pymupdf.open()
     page = pdf.new_page()
     page.insert_text((72, 72), text)
     path = tmp_path / name
@@ -30,7 +30,7 @@ def test_pdf_loader_extracts_page_text(tmp_path):
 
 def test_pdf_loader_rejects_empty_pdf(tmp_path):
     path = tmp_path / "empty.pdf"
-    pdf = fitz.open()
+    pdf = pymupdf.open()
     pdf.new_page()
     pdf.save(path)
     pdf.close()
